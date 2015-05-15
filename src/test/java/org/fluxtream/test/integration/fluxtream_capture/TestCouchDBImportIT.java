@@ -1,5 +1,6 @@
 package org.fluxtream.test.integration.fluxtream_capture;
 
+import net.sf.json.JSONArray;
 import net.sf.json.JSONObject;
 import org.ektorp.CouchDbConnector;
 import org.ektorp.Revision;
@@ -131,6 +132,69 @@ public class TestCouchDBImportIT {
         assertTrue(countRepeatedly("select count(*) from Facet_FluxtreamCaptureTopic WHERE guestId=(select max(id) from Guest)", 2, 10, 1000));
         assertTrue(countRepeatedly("select count(*) from Facet_FluxtreamCaptureObservation WHERE guestId=(select max(id) from Guest)", 6, 10, 1000));
         assertTrue(countRepeatedly("select count(*) from ChannelMapping WHERE guestId=(select max(id) from Guest)", 2, 10, 1000));
+
+        JSONObject fluxtreamCaptureSource = getFluxtreamCaptureSourceFromSourcesList();
+        // there should only be one source named "FluxtreamCapture"
+        assertTrue(fluxtreamCaptureSource.getString("name").equals("FluxtreamCapture"));
+
+        // there should be exactly two channels named "Hunger" and "Anger"
+        checkChannelNames(fluxtreamCaptureSource, new String[]{"Hunger", "Anger"});
+
+        // let's add a topic and rename an existing one
+        createTopic(topicsDb, "Elated", 2);
+        renameTopic(topicsDb, "Hunger", "Faim");
+
+        // trigger a FluxtreamCapture connector update
+        triggerFluxtreamCaptureConnectorUpdate();
+
+        // check that we now have 3 topics named "Faim", "Anger" and "Elated"
+        assertTrue(countRepeatedly("select count(*) from Facet_FluxtreamCaptureTopic WHERE guestId=(select max(id) from Guest)", 3, 10, 1000));
+        fluxtreamCaptureSource = getFluxtreamCaptureSourceFromSourcesList();
+        checkChannelNames(fluxtreamCaptureSource, new String[]{"Faim", "Anger", "Elated"});
+
+        // create a few 'elated' observations
+        createObservation(2, 2, "2015-05-02T08:20:00.000Z", observationsDb, "Happy");
+        createObservation(2, 4, "2015-05-03T10:10:00.000Z", observationsDb, "So Happy");
+        createObservation(2, 3, "2015-05-04T09:40:00.000Z", observationsDb, "Oh Joy");
+
+        // trigger a FluxtreamCapture connector update
+        triggerFluxtreamCaptureConnectorUpdate();
+
+        assertTrue(countRepeatedly("select count(*) from Facet_FluxtreamCaptureObservation WHERE guestId=(select max(id) from Guest)", 9, 10, 1000));
+    }
+
+    private JSONObject getFluxtreamCaptureSourceFromSourcesList() {
+        ResponseEntity<String> sourcesList = getSourcesList();
+        assertTrue(sourcesList.getStatusCode().value()<400);
+
+        JSONObject sourcesListJSON = JSONObject.fromObject(sourcesList.getBody());
+        JSONArray sources = sourcesListJSON.getJSONArray("sources");
+
+        return sources.getJSONObject(0);
+    }
+
+    private void renameTopic(CouchDbConnector topicsDb, String previousName, String newName) {
+        List<String> allTopicDocIds = topicsDb.getAllDocIds();
+        for (String topicDocId : allTopicDocIds) {
+            CouchTopic couchTopic = topicsDb.get(CouchTopic.class, topicDocId);
+            if (couchTopic.getName().equals(previousName)) {
+                couchTopic.setName(newName);
+                topicsDb.update(couchTopic);
+                break;
+            }
+        }
+    }
+
+    private void checkChannelNames(JSONObject fluxtreamCaptureSource, String[] expectedChannelNames) {
+        JSONArray fluxtreamCaptureChannels = fluxtreamCaptureSource.getJSONArray("channels");
+        nextExpectedChannelName: for (String expectedChannelName : expectedChannelNames) {
+            for (int i=0; i<fluxtreamCaptureChannels.size(); i++) {
+                JSONObject channel = fluxtreamCaptureChannels.getJSONObject(i);
+                if (channel.getString("name").equals(expectedChannelName))
+                    continue nextExpectedChannelName;
+            }
+            fail("Could not find channel named: " + expectedChannelName);
+        }
     }
 
     private boolean countRepeatedly(String nativeCountQuery, int expectedCount, int remainingCalls, int delayInMillis) {
@@ -221,6 +285,22 @@ public class TestCouchDBImportIT {
         ResponseEntity<String> response = restTemplate.exchange(deleteURL, HttpMethod.DELETE,
                 new HttpEntity(restHelper.getBasicAuthHeader(env.flxAdminUserUsername, env.flxAdminUserPassword)), String.class);
         return response;
+    }
+
+    public ResponseEntity<String> getSourcesList() {
+        RestTemplate restTemplate = restHelper.getRestTemplate();
+        long guestId = getGuestId(FLX_COUCHDB_IMPORT_TESTER_USERNAME);
+        String sourcesListURL = String.format("%sapi/v1/bodytrack/users/%s/sources/list", env.targetHomeBaseUrl, guestId);
+        ResponseEntity<String> response = restTemplate.exchange(sourcesListURL, HttpMethod.GET,
+                new HttpEntity(restHelper.getBasicAuthHeader(env.flxAdminUserUsername, env.flxAdminUserPassword)), String.class);
+        return response;
+    }
+
+    private long getGuestId(String flxCouchdbImportTesterUsername) {
+        Query nativeQuery = em.createNativeQuery("SELECT id FROM Guest WHERE username=?");
+        nativeQuery.setParameter(1, flxCouchdbImportTesterUsername);
+        Long guestId = ((BigInteger) nativeQuery.getSingleResult()).longValue();
+        return guestId;
     }
 
 }
