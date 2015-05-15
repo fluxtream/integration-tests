@@ -105,8 +105,8 @@ public class TestCouchDBImportIT {
         CouchDbConnector topicsDb = CouchUtils.getCouchDbConnector(user_login, user_token, String.format("self_report_db_%s_%s", "topics", user_login));
 
         // now create a couple topics
-        createTopic(topicsDb, "Hunger", 0);
-        createTopic(topicsDb, "Anger", 1);
+        CouchTopic hungerTopic = createTopic(topicsDb, "Hunger");
+        CouchTopic angerTopic = createTopic(topicsDb, "Anger");
 
         // check that they have been created in couchDb
         List<String> topicDocIds = topicsDb.getAllDocIds();
@@ -114,12 +114,12 @@ public class TestCouchDBImportIT {
 
         // create a few observations
         CouchDbConnector observationsDb = CouchUtils.getCouchDbConnector(user_login, user_token, String.format("self_report_db_%s_%s", "observations", user_login));
-        createObservation(0, 2, "2015-05-02T07:00:00.000Z", observationsDb, "Comment 1");
-        createObservation(0, 4, "2015-05-03T09:00:00.000Z", observationsDb, "Comment 2");
-        createObservation(0, 3, "2015-05-04T08:00:00.000Z", observationsDb, "Comment 3");
-        createObservation(0, 2, "2015-05-05T07:00:00.000Z", observationsDb, "Comment 4");
-        createObservation(0, 4, "2015-05-06T09:00:00.000Z", observationsDb, "Comment 5");
-        createObservation(0, 3, "2015-05-07T08:00:00.000Z", observationsDb, "Comment 6");
+        createObservation(hungerTopic.getId(), 2, "2015-05-02T07:00:00.000Z", observationsDb, "Comment 1");
+        createObservation(hungerTopic.getId(), 4, "2015-05-03T09:00:00.000Z", observationsDb, "Comment 2");
+        createObservation(hungerTopic.getId(), 3, "2015-05-04T08:00:00.000Z", observationsDb, "Comment 3");
+        createObservation(hungerTopic.getId(), 2, "2015-05-05T07:00:00.000Z", observationsDb, "Comment 4");
+        createObservation(hungerTopic.getId(), 4, "2015-05-06T09:00:00.000Z", observationsDb, "Comment 5");
+        createObservation(hungerTopic.getId(), 3, "2015-05-07T08:00:00.000Z", observationsDb, "Comment 6");
 
         // check that the have been created OK
         List<String> observationDocIds = observationsDb.getAllDocIds();
@@ -141,7 +141,7 @@ public class TestCouchDBImportIT {
         checkChannelNames(fluxtreamCaptureSource, new String[]{"Hunger", "Anger"});
 
         // let's add a topic and rename an existing one
-        createTopic(topicsDb, "Elated", 2);
+        CouchTopic elatedTopic = createTopic(topicsDb, "Elated");
         renameTopic(topicsDb, "Hunger", "Faim");
 
         // trigger a FluxtreamCapture connector update
@@ -153,9 +153,9 @@ public class TestCouchDBImportIT {
         checkChannelNames(fluxtreamCaptureSource, new String[]{"Faim", "Anger", "Elated"});
 
         // create a few 'elated' observations
-        createObservation(2, 2, "2015-05-02T08:20:00.000Z", observationsDb, "Happy");
-        createObservation(2, 4, "2015-05-03T10:10:00.000Z", observationsDb, "So Happy");
-        createObservation(2, 3, "2015-05-04T09:40:00.000Z", observationsDb, "Oh Joy");
+        createObservation(elatedTopic.getId(), 2, "2015-05-02T08:20:00.000Z", observationsDb, "Happy");
+        createObservation(elatedTopic.getId(), 4, "2015-05-03T10:10:00.000Z", observationsDb, "So Happy");
+        createObservation(elatedTopic.getId(), 3, "2015-05-04T09:40:00.000Z", observationsDb, "Oh Joy");
 
         // trigger a FluxtreamCapture connector update
         triggerFluxtreamCaptureConnectorUpdate();
@@ -224,7 +224,7 @@ public class TestCouchDBImportIT {
         return response;
     }
 
-    private void createObservation(int topicId, int value, String creationTime, CouchDbConnector db, String comment) {
+    private void createObservation(String topicId, int value, String creationTime, CouchDbConnector db, String comment) {
         CouchObservation observation = new CouchObservation();
         observation.setCreationTime(creationTime);
         observation.setCreationDate(creationTime.substring(0, 10));
@@ -232,22 +232,23 @@ public class TestCouchDBImportIT {
         observation.setCreationDate(creationTime.substring(0, 10));
         observation.setTimezone("Europe/Berlin");
         observation.setComment(comment);
-        observation.setTopicId(String.valueOf(topicId));
+        observation.setTopicId(topicId);
         observation.setValue(String.valueOf(value));
         DateTime dateTime = ISODateTimeFormat.dateTime().parseDateTime(creationTime);
         observation.setObservationTime(ISODateTimeFormat.dateTimeNoMillis().print(dateTime));
         db.create(observation);
     }
 
-    private void createTopic(CouchDbConnector db, String topicName, int topicNumber) {
+    private CouchTopic createTopic(CouchDbConnector db, String topicName) {
         CouchTopic topic = new CouchTopic();
         topic.setName(topicName);
         long now = System.currentTimeMillis();
         topic.setCreationTime(ISODateTimeFormat.dateTimeNoMillis().print(now));
         topic.setUpdateTime(ISODateTimeFormat.dateTimeNoMillis().print(now));
+        topic.setType("Numeric");
         topic.setDefaultValue("1");
-        topic.setTopicNumber(topicNumber);
         db.create(topic);
+        return topic;
     }
 
     private ResponseEntity<String> couchDBInit() {
